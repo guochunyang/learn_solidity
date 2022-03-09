@@ -14,38 +14,44 @@ contract MultiSigWallet {
     event RevokeConfirmation(address indexed owner, uint256 indexed txIndex);
     event ExecuteTransaction(address indexed owner, uint256 indexed txIndex);
 
-    address[] public owners;
-    mapping(address => bool) public isOwner;
-    uint256 public numConfirmationsRequired;
+    address[] public owners; // 记录所有的 owners
+    mapping(address => bool) public isOwner; // 方便查询 address 是否为 owner 的快速 map
+    uint256 public numConfirmationsRequired; // tx 需要几个owner确认
 
+    // 定义 tx
     struct Transaction {
         address to;
         uint256 value;
         bytes data;
-        bool executed;
-        uint256 numConfirmations;
+        bool executed; // 是否执行
+        uint256 numConfirmations; // 当前票数
     }
 
     // mapping from tx index => owner => bool
+    // 在某个 tx 下，某个用户是否 confirm 了该 tx
     mapping(uint256 => mapping(address => bool)) public isConfirmed;
 
-    Transaction[] public transactions;
+    Transaction[] public transactions; // 存储所有的 tx
 
+    // 只有 owner 才可以调用
     modifier onlyOwner() {
         require(isOwner[msg.sender], "not owner");
         _;
     }
 
+    // 检查 index 指向的 txn 是否存在
     modifier txExists(uint256 _txIndex) {
         require(_txIndex < transactions.length, "tx does not exist");
         _;
     }
 
+    // 确保 index 指向的 txn 还没有执行过
     modifier notExecuted(uint256 _txIndex) {
         require(!transactions[_txIndex].executed, "tx already executed");
         _;
     }
 
+    // 确保 index 指向的 txn 还没被 confirm
     modifier notConfirmed(uint256 _txIndex) {
         require(!isConfirmed[_txIndex][msg.sender], "tx already confirmed");
         _;
@@ -62,7 +68,9 @@ contract MultiSigWallet {
         for (uint256 i = 0; i < _owners.length; i++) {
             address owner = _owners[i];
 
+            // 确保地址是有效的
             require(owner != address(0), "invalid owner");
+            // 确保传入的 _owners 里面没有重复
             require(!isOwner[owner], "owner not unique");
 
             isOwner[owner] = true;
@@ -73,6 +81,7 @@ contract MultiSigWallet {
     }
 
     receive() external payable {
+        // 接收 eth，并将余额信息发出 Event
         emit Deposit(msg.sender, msg.value, address(this).balance);
     }
 
@@ -81,6 +90,7 @@ contract MultiSigWallet {
         uint256 _value,
         bytes memory _data
     ) public onlyOwner {
+        // 当前事务的个数，也是即将生成的 tx 的位置索引
         uint256 txIndex = transactions.length;
 
         transactions.push(
@@ -105,7 +115,7 @@ contract MultiSigWallet {
     {
         Transaction storage transaction = transactions[_txIndex];
         transaction.numConfirmations += 1;
-        isConfirmed[_txIndex][msg.sender] = true;
+        isConfirmed[_txIndex][msg.sender] = true; // 记录下这个 owner confirm 了这个 tx
 
         emit ConfirmTransaction(msg.sender, _txIndex);
     }
@@ -118,6 +128,7 @@ contract MultiSigWallet {
     {
         Transaction storage transaction = transactions[_txIndex];
 
+        // 确保 confirm 票数是足够的
         require(
             transaction.numConfirmations >= numConfirmationsRequired,
             "cannot execute tx"
@@ -125,6 +136,7 @@ contract MultiSigWallet {
 
         transaction.executed = true;
 
+        // 执行真正的操作
         (bool success, ) = transaction.to.call{value: transaction.value}(
             transaction.data
         );
@@ -133,6 +145,7 @@ contract MultiSigWallet {
         emit ExecuteTransaction(msg.sender, _txIndex);
     }
 
+    // 撤销确认
     function revokeConfirmation(uint256 _txIndex)
         public
         onlyOwner
